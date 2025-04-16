@@ -8,8 +8,8 @@ class OpenRouterCookieExtractor(BaseCase):
 
     def test_extract_openrouter_cookies(self):
         # --- Get Credentials and Proxy Info ---
-        email = os.environ.get("elisha49@ptct.net")
-        password = os.environ.get("TesF@gm#32391Go")
+        email = os.environ.get("OPENROUTER_EMAIL")
+        password = os.environ.get("OPENROUTER_PASSWORD")
         # Proxy is handled by the --proxy command-line arg from the workflow
 
         if not email:
