@@ -1,17 +1,17 @@
+# .github/workflows/extract_openrouter_cookies.yml
 name: Extract OpenRouter Cookies
 
 on:
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
     inputs:
       email:
         description: 'OpenRouter Email Address'
         required: true
         type: string
-      # Removed proxy_type input
 
 jobs:
   extract-cookies:
-    runs-on: macos-latest # As requested: Use macOS runner
+    runs-on: macos-latest
 
     steps:
       - name: Check out repository code
@@ -33,17 +33,15 @@ jobs:
 
       - name: Run SeleniumBase script to extract cookies
         env:
-          # Pass email from workflow input
           OPENROUTER_EMAIL: ${{ github.event.inputs.email }}
-          # Pass password securely from GitHub Secrets
-          OPENROUTER_PASSWORD: ${{ secrets.OPENROUTER_PASSWORD }}
-          # Removed PROXY environment variables
+          OPENROUTER_PASSWORD: ${{ secrets.OPENROUTER_PASSWORD }} # Still need password secret
         run: |
-          # Run the pytest script directly without proxy
+          # Run directly without proxy
           echo "Running command: pytest extract_cookies.py --uc -s"
           pytest extract_cookies.py --uc -s
 
       - name: Upload cookies as artifact
+        # This step will likely fail if the script fails, which is okay.
         uses: actions/upload-artifact@v4
         with:
           name: openrouter-cookies
