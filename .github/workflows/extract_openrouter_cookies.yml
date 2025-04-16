@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       proxy_type:
-        description: 'Proxy type (http, https, socks4, socks5)'
+        description: 'Proxy type (http, https, socks4, socks5). Leave empty if no proxy.'
         required: false
         default: 'http'
         type: string
@@ -39,20 +39,29 @@ jobs:
         env:
           # Pass email from workflow input
           OPENROUTER_EMAIL: ${{ github.event.inputs.email }}
-          # Pass password and proxy securely from GitHub Secrets
+          # Pass password securely from GitHub Secrets
           OPENROUTER_PASSWORD: ${{ secrets.OPENROUTER_PASSWORD }}
-          PROXY_STRING: ${{ secrets.PROXY_STRING }} # Store as user:pass@host:port
+          # Attempt to retrieve PROXY_STRING secret (will be empty if not set)
+          PROXY_STRING: ${{ secrets.PROXY_STRING }}
           PROXY_TYPE: ${{ github.event.inputs.proxy_type }}
         run: |
-          # Construct the full proxy URL (SeleniumBase --proxy needs full string)
-          # Ensure PROXY_STRING secret is set in user:pass@host:port format
-          FULL_PROXY="${{ env.PROXY_TYPE }}://${{ env.PROXY_STRING }}"
+          # Initialize pytest command without proxy
+          PYTEST_CMD="pytest extract_cookies.py --uc -s"
 
-          # Run the pytest script with necessary options
-          # --uc enables Undetected Chromedriver mode (essential for stealth & CAPTCHA)
-          # --proxy passes the full proxy string securely
-          # -s shows print statements from the test
-          pytest extract_cookies.py --proxy="${FULL_PROXY}" --uc -s
+          # Check if PROXY_STRING has a value
+          if [ -n "${{ env.PROXY_STRING }}" ]; then
+            echo "Proxy string found, configuring proxy..."
+            # Construct the full proxy URL
+            FULL_PROXY="${{ env.PROXY_TYPE }}://${{ env.PROXY_STRING }}"
+            # Add the --proxy argument to the command
+            PYTEST_CMD="${PYTEST_CMD} --proxy=\"${FULL_PROXY}\""
+          else
+            echo "No proxy string found, running without proxy."
+          fi
+
+          # Execute the constructed pytest command
+          echo "Running command: ${PYTEST_CMD}"
+          eval ${PYTEST_CMD} # Use eval to handle quotes correctly
 
       - name: Upload cookies as artifact
         uses: actions/upload-artifact@v4
