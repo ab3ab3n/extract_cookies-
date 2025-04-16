@@ -20,73 +20,70 @@ class OpenRouterCookieExtractor(BaseCase):
 
         try:
             signin_url = "https://openrouter.ai/sign-in"
-            print(f"Opening stealthily with disconnect: {signin_url}")
+            print(f"Opening stealthily: {signin_url}")
 
-            # === Attempt 2: Use uc_open_with_disconnect, stay disconnected longer ===
-            # This opens the page in a new tab and leaves the driver disconnected.
-            # Use the correct keyword argument: timeout
-            self.uc_open_with_disconnect(signin_url, timeout=8.0) # <<< CORRECTED KEYWORD
-            print("Page opened (driver disconnected). Adding extra sleep...")
-            # Longer sleep while disconnected - Keep this for extra buffer
-            self.sleep(7.0)
+            # === Revert to uc_open_with_reconnect ===
+            # This method initializes self.cdp correctly after reconnecting
+            print("Using uc_open_with_reconnect (longer time)...")
+            # Keep increased reconnect_time
+            self.uc_open_with_reconnect(signin_url, reconnect_time=7.0)
+            print("Page opened/reconnected. Adding extra sleep...")
+            # Keep increased sleep after reconnect
+            self.sleep(5.0)
 
             print("Attempting early CAPTCHA click (might do nothing if none)...")
-            # Try clicking potential CAPTCHA area while still disconnected
+            # Keep this attempt after reconnecting
             try:
-                captcha_iframe_selector = 'iframe[title="Cloudflare Turnstile"]'
-                iframe_rect = self.cdp.get_element_rect(captcha_iframe_selector, timeout=3)
-                iframe_center_x = iframe_rect.x + (iframe_rect.width / 2)
-                iframe_center_y = iframe_rect.y + (iframe_rect.height / 2)
-                self.uc_gui_click_x_y(iframe_center_x, iframe_center_y)
-                print("Early CAPTCHA click attempted via coordinates.")
-                self.sleep(2.5)
+                # Use the standard click now, as PyAutoGUI might be less reliable
+                # without precise coordinates / iframe handling yet
+                self.uc_gui_click_captcha()
+                print("Early CAPTCHA click attempted via standard method.")
+                self.sleep(2.5) # Pause after potential CAPTCHA interaction
             except Exception as captcha_err:
-                print(f"Could not find/click CAPTCHA early (maybe none present): {captcha_err}")
-                try:
-                    self.uc_gui_click_captcha()
-                    print("Early CAPTCHA click attempted via standard method.")
-                    self.sleep(2.5)
-                except Exception as captcha_err2:
-                     print(f"Standard CAPTCHA click also failed: {captcha_err2}")
+                print(f"Early CAPTCHA click failed or not needed: {captcha_err}")
 
-            print("Waiting for email field using CDP...")
+            print("Waiting for email field...")
             email_selector = '#identifier-field'
-            self.cdp.wait_for_element_visible(email_selector, timeout=25)
+            # Use standard wait now that driver is connected and self.cdp exists
+            self.wait_for_element(email_selector, timeout=25) # <<< Standard Wait
 
             print(f"Typing email: {email}")
+            # Use CDP type for potential stealth benefits
             self.cdp.type(email_selector, email)
             self.sleep(0.8)
 
             print("Clicking Continue (Email)...")
             continue_button_selector = 'form button:contains("Continue")'
+            # Use CDP click
             self.cdp.click(continue_button_selector)
-            self.sleep(7.0)
+            self.sleep(7.0) # <<< Keep increased sleep
 
-            # === Step b: Enter Password (still disconnected) ===
-            print("Waiting for password field using CDP...")
+            # === Step b: Enter Password ===
+            print("Waiting for password field...")
             password_selector = '#password-field'
-            self.cdp.wait_for_element_visible(password_selector, timeout=20)
+            # Use standard wait
+            self.wait_for_element(password_selector, timeout=20) # <<< Standard Wait
             print("Typing password...")
+            # Use CDP type
             self.cdp.type(password_selector, password)
             self.sleep(0.8)
 
             print("Clicking Continue (Password)...")
+            # Use CDP click
             self.cdp.click(continue_button_selector)
-            print("Adding significant sleep after final continue click...")
-            self.sleep(10.0)
+            print("Adding sleep after final continue click...")
+            self.sleep(5.0) # Reduced slightly, but still significant
 
-            # === Reconnect and Verify Login ===
-            print("Reconnecting WebDriver to verify login...")
-            self.reconnect()
+            # === Verify Login (Driver is already connected) ===
             print("Waiting for successful login indicator...")
-            self.wait_for_element('button[aria-label*="User menu"]', timeout=30)
+            self.wait_for_element('button[aria-label*="User menu"]', timeout=35) # <<< Increased timeout
             print("Login appears successful.")
             self.sleep(3)
 
             # === Step c: Navigate to Keys page and extract cookies ===
             keys_url = "https://openrouter.ai/settings/keys"
             print(f"Navigating to Keys page: {keys_url}")
-            self.open(keys_url)
+            self.open(keys_url) # Standard open
             print("Waiting for Keys page elements...")
             self.wait_for_element('h2:contains("API Keys")', timeout=30)
             print("Keys page loaded.")
@@ -115,7 +112,7 @@ class OpenRouterCookieExtractor(BaseCase):
             print("Attempting to save screenshot...")
             time.sleep(1)
             try:
-                if not self.is_connected(): self.reconnect(0.2)
+                # No need to check is_connected, should be connected here
                 self.save_screenshot_to_logs(name="error_screenshot")
                 print("Screenshot saved to logs.")
             except Exception as ss_error:
