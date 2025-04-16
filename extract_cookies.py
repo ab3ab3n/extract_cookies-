@@ -2,152 +2,156 @@ import os
 import json
 import sys
 import time
-from seleniumbase import BaseCase
-from seleniumbase import SB
-from seleniumbase.common import exceptions  # Import specific exceptions
+from seleniumbase import SB # Import SB
+from seleniumbase.common import exceptions
 
-# --- Pytest Integration ---
-# Allows running with "pytest extract_cookies.py --uc -s"
-class OpenRouterCookieExtractor(BaseCase):
+# --- Get Credentials EARLY ---
+email = os.environ.get("OPENROUTER_EMAIL")
+password = os.environ.get("OPENROUTER_PASSWORD")
 
-    # Keep credentials accessible within the class scope if needed later
-    email = os.environ.get("OPENROUTER_EMAIL")
-    password = os.environ.get("OPENROUTER_PASSWORD")
+if not email:
+    print("::error::Missing environment variable: OPENROUTER_EMAIL")
+    sys.exit(1)
+if not password:
+    print("::error::Missing environment variable: OPENROUTER_PASSWORD")
+    sys.exit(1)
 
-    # --- Main Logic Function (called by the test) ---
-    def run_extraction_logic(self):
-        if not self.email:
-            self.fail("Missing environment variable: OPENROUTER_EMAIL")
-        if not self.password:
-            self.fail("Missing environment variable: OPENROUTER_PASSWORD")
+# --- Use SB Context Manager ---
+# SB will parse the --uc flag from the pytest command
+# Add test=True to get logging benefits (screenshots on failure)
+# Add headless=False for macOS runner GUI needed by uc_gui_click_captcha
+# Add incognito/guest for potential extra stealth
+try:
+    with SB(uc=True, test=True, headless=False, incognito=True, guest=True) as sb:
+        # 'sb' is now the SeleniumBase instance, replacing 'self'
 
         print("Starting OpenRouter login process...")
         signin_url = "https://openrouter.ai/sign-in"
         page_source = None
         screenshot_path = None
 
+        print(f"Opening stealthily: {signin_url}")
+        print("Using uc_open_with_reconnect (long time)...")
+        # This method now belongs to the 'sb' object
+        sb.uc_open_with_reconnect(signin_url, reconnect_time=8.0)
+        print("Page opened/reconnected. Adding extra sleep...")
+        sb.sleep(6.0)
+
+        print("Attempting early CAPTCHA click (might do nothing if none)...")
         try:
-            print(f"Opening stealthily: {signin_url}")
-            print("Using uc_open_with_reconnect (long time)...")
-            # Use reconnect, longer time, keep it headed for macOS GUI
-            self.uc_open_with_reconnect(signin_url, reconnect_time=8.0)
-            print("Page opened/reconnected. Adding extra sleep...")
-            self.sleep(6.0) # Moderate sleep after reconnect
+            sb.uc_gui_click_captcha() # Use sb object
+            print("Early CAPTCHA click attempted.")
+            sb.sleep(3.0)
+        except Exception as captcha_err:
+            print(f"Early CAPTCHA click failed or not needed: {captcha_err}")
 
-            # Optional: Try early CAPTCHA click (still might fail)
-            print("Attempting early CAPTCHA click (might do nothing if none)...")
+        print("Waiting for email field...")
+        email_selector = '#identifier-field'
+        # Use sb object for waits
+        sb.wait_for_element_present(email_selector, timeout=30) # Increased timeout
+        sb.sleep(1.0)
+        sb.wait_for_element_visible(email_selector, timeout=5)
+
+        print(f"Typing email: {email}")
+        # Use sb.cdp (This should be initialized correctly by SB manager)
+        sb.cdp.type(email_selector, email)
+        sb.sleep(1.0)
+
+        print("Clicking Continue (Email)...")
+        continue_button_selector = 'form button:contains("Continue")'
+        # Use sb.cdp
+        sb.cdp.click(continue_button_selector)
+        sb.sleep(8.0) # Increased sleep
+
+        # --- Password Step ---
+        print("Waiting for password field...")
+        password_selector = '#password-field'
+        # Use sb object
+        sb.wait_for_element_present(password_selector, timeout=25) # Increased timeout
+        sb.sleep(1.0)
+        sb.wait_for_element_visible(password_selector, timeout=5)
+
+        print("Typing password...")
+        # Use sb.cdp
+        sb.cdp.type(password_selector, password)
+        sb.sleep(1.0)
+
+        print("Clicking Continue (Password)...")
+        # Use sb.cdp
+        sb.cdp.click(continue_button_selector)
+        print("Adding long sleep after final continue click...")
+        sb.sleep(12.0)
+
+        # --- Verify Login ---
+        print("Reconnecting WebDriver if needed (usually not after reconnect)...")
+        # Use sb object
+        if not sb.is_connected(): sb.reconnect(0.5)
+        print("Waiting for successful login indicator...")
+        # Use sb object
+        sb.wait_for_element('a[href="/settings"]', timeout=40)
+        print("Login appears successful.")
+        sb.sleep(4.0)
+
+        # --- Navigate & Extract ---
+        keys_url = "https://openrouter.ai/settings/keys"
+        print(f"Navigating to Keys page: {keys_url}")
+        # Use sb object
+        sb.open(keys_url)
+        print("Waiting for Keys page elements...")
+        # Use sb object
+        sb.wait_for_element('h2:contains("API Keys")', timeout=35)
+        print("Keys page loaded.")
+        sb.sleep(4.0)
+
+        print("Extracting cookies for domain 'clerk.openrouter.ai'...")
+        # Use sb object
+        all_cookies = sb.get_cookies()
+        clerk_cookies = [
+            cookie for cookie in all_cookies
+            if cookie.get('domain') == 'clerk.openrouter.ai'
+        ]
+
+        if not clerk_cookies:
+            print("WARNING: No cookies found for domain 'clerk.openrouter.ai'.")
+            sb.fail("No cookies found for domain 'clerk.openrouter.ai'.")
+        else:
+            print(f"Found {len(clerk_cookies)} cookies for the domain.")
+
+        output_file = "openrouter_cookies.json"
+        print(f"Saving cookies to {output_file}...")
+        with open(output_file, 'w') as f:
+            json.dump(clerk_cookies, f, indent=4)
+        print(f"Successfully extracted and saved cookies to {output_file}")
+
+# Handles exceptions outside the SB block or during SB init
+except Exception as e:
+    print(f"\nAn critical error occurred: {e}")
+    print(f"::error::Test failed during execution: {e}")
+    # SB with test=True handles screenshots automatically on failure/error
+    sys.exit(1)
+
+
+# --- Pytest Integration (Keep this for running via pytest) ---
+class OpenRouterCookieExtractor(BaseCase):
+    def test_verify_cookie_file_creation(self):
+        print("\nVerifying if cookie file was created by the SB block...")
+        output_file = "openrouter_cookies.json"
+        if not os.path.exists(output_file):
+            # Try to access logs from the SB run if possible (might be tricky)
+            log_path = "./latest_logs/" # Default log path
+            screenshot_path = os.path.join(log_path, "test_verify_cookie_file_creation", "error_screenshot.png") # Example path structure
+            if os.path.exists(log_path):
+                 print(f"::warning::Main logic failed. Check logs in {log_path} or the GitHub Actions artifacts if available.")
+                 if os.path.exists(screenshot_path):
+                     print(f"::warning::An error screenshot might be available at {screenshot_path}")
+            self.fail(f"Cookie file '{output_file}' was NOT created! Main logic failed.")
+        else:
+            print(f"Cookie file '{output_file}' was created successfully.")
             try:
-                self.uc_gui_click_captcha()
-                print("Early CAPTCHA click attempted.")
-                self.sleep(3.0)
-            except Exception as captcha_err:
-                print(f"Early CAPTCHA click failed or not needed: {captcha_err}")
-
-            print("Waiting for email field...")
-            email_selector = '#identifier-field'
-            # Wait a reasonable time, but expect this might fail
-            self.wait_for_element_visible(email_selector, timeout=25)
-
-            print(f"Typing email: {self.email}")
-            self.cdp.type(email_selector, self.email)
-            self.sleep(1.0)
-
-            print("Clicking Continue (Email)...")
-            continue_button_selector = 'form button:contains("Continue")'
-            self.cdp.click(continue_button_selector)
-            self.sleep(7.0) # Long sleep for password page
-
-            # --- Password Step ---
-            print("Waiting for password field...")
-            password_selector = '#password-field'
-            self.wait_for_element_visible(password_selector, timeout=20)
-            print("Typing password...")
-            self.cdp.type(password_selector, self.password)
-            self.sleep(1.0)
-
-            print("Clicking Continue (Password)...")
-            self.cdp.click(continue_button_selector)
-            print("Adding long sleep after final continue click...")
-            self.sleep(10.0)
-
-            # --- Verify & Navigate ---
-            print("Reconnecting WebDriver to verify login...")
-            # Reconnect ONLY IF DISCONNECTED (uc_open_with_reconnect leaves it connected)
-            if not self.is_connected(): self.reconnect(0.5)
-            print("Waiting for successful login indicator...")
-            self.wait_for_element('a[href="/settings"]', timeout=40)
-            print("Login appears successful.")
-            self.sleep(3.0)
-
-            keys_url = "https://openrouter.ai/settings/keys"
-            print(f"Navigating to Keys page: {keys_url}")
-            self.open(keys_url)
-            print("Waiting for Keys page elements...")
-            self.wait_for_element('h2:contains("API Keys")', timeout=30)
-            print("Keys page loaded.")
-            self.sleep(3.0)
-
-            # --- Cookie Extraction ---
-            print("Extracting cookies for domain 'clerk.openrouter.ai'...")
-            all_cookies = self.get_cookies()
-            clerk_cookies = [
-                cookie for cookie in all_cookies
-                if cookie.get('domain') == 'clerk.openrouter.ai'
-            ]
-
-            if not clerk_cookies:
-                print("WARNING: No cookies found for domain 'clerk.openrouter.ai'.")
-                self.fail("No cookies found for domain 'clerk.openrouter.ai'.")
-            else:
-                print(f"Found {len(clerk_cookies)} cookies for the domain.")
-
-            output_file = "openrouter_cookies.json"
-            print(f"Saving cookies to {output_file}...")
-            with open(output_file, 'w') as f:
-                json.dump(clerk_cookies, f, indent=4)
-            print(f"Successfully extracted and saved cookies to {output_file}")
-
-        # --- Specific Exception Handling ---
-        except (exceptions.NoSuchElementException, exceptions.ElementNotVisibleException) as element_error:
-            print(f"\nElement Interaction Error: {element_error}")
-            print("Attempting to capture page source for debugging...")
-            try:
-                 # Try reconnecting if needed before getting source
-                if not self.is_connected(): self.reconnect(0.5)
-                page_source = self.get_page_source()
-                source_file = os.path.join(self.log_path, "page_source_on_error.html")
-                with open(source_file, "w", encoding='utf-8') as f:
-                    f.write(page_source)
-                print(f"Page source saved to: {source_file}")
-                # Optional: Print a snippet
-                # print("Page source snippet:\n", page_source[0:1000])
-            except Exception as source_err:
-                print(f"WARNING: Failed to get page source: {source_err}")
-            print("Attempting to save screenshot...")
-            try:
-                if not self.is_connected(): self.reconnect(0.5)
-                screenshot_path = self.save_screenshot_to_logs(name="element_not_found_error")
-                print(f"Screenshot saved to: {screenshot_path}")
-            except Exception as ss_error:
-                print(f"WARNING: Failed to save screenshot: {ss_error}")
-            self.fail(f"Test failed finding/interacting with element: {element_error}")
-
-        # --- General Exception Handling ---
-        except Exception as e:
-            print(f"\nAn unexpected error occurred: {e}")
-            print("Attempting to save screenshot...")
-            time.sleep(1) # Small delay
-            try:
-                if not self.is_connected(): self.reconnect(0.5)
-                screenshot_path = self.save_screenshot_to_logs(name="unexpected_error")
-                print(f"Screenshot saved to: {screenshot_path}")
-            except Exception as ss_error:
-                print(f"WARNING: Failed to save screenshot: {ss_error}")
-            self.fail(f"Test failed during execution: {e}")
-
-    # --- Pytest Test Method ---
-    def test_run_extraction(self):
-        # Add headless=False to ensure GUI for PyAutoGUI clicks
-        # Note: SB() manager might be slightly more robust, but BaseCase works
-        # If using BaseCase, ensure --uc is passed via pytest in workflow
-        self.run_extraction_logic()
+                with open(output_file, 'r') as f:
+                    data = json.load(f)
+                    if not isinstance(data, list):
+                        self.fail("Cookie file content is not a list!")
+                    print("Cookie file content seems valid (it's a list).")
+            except Exception as json_err:
+                 self.fail(f"Error reading/verifying cookie file: {json_err}")
