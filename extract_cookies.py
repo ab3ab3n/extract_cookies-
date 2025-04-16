@@ -1,7 +1,7 @@
 import os
 import json
 import sys
-import time  # Import time for a potential manual sleep if needed
+import time
 from seleniumbase import BaseCase
 BaseCase.main(__name__, __file__)
 
@@ -20,66 +20,84 @@ class OpenRouterCookieExtractor(BaseCase):
 
         try:
             signin_url = "https://openrouter.ai/sign-in"
-            print(f"Opening stealthily: {signin_url}")
+            print(f"Opening stealthily with disconnect: {signin_url}")
 
-            # === Attempt 1: Longer Reconnect & Early CAPTCHA Click ===
-            print("Using uc_open_with_reconnect (longer time)...")
-            # Increased reconnect time significantly
-            self.uc_open_with_reconnect(signin_url, reconnect_time=7.0)
-            print("Page opened/reconnected. Adding extra sleep...")
-            # Add a longer sleep AFTER reconnecting before doing anything else
-            self.sleep(5.0) # <<< Longer sleep after reconnect
+            # === Attempt 2: Use uc_open_with_disconnect, stay disconnected longer ===
+            # This opens the page in a new tab and leaves the driver disconnected.
+            self.uc_open_with_disconnect(signin_url, disconnect_time=8.0) # <<< USE DISCONNECT & LONGER TIME
+            print("Page opened (driver disconnected). Adding extra sleep...")
+            # Longer sleep while disconnected
+            self.sleep(7.0) # <<< INCREASED SLEEP WHILE DISCONNECTED
 
             print("Attempting early CAPTCHA click (might do nothing if none)...")
-            # Try clicking potential CAPTCHA area immediately after loading/sleep
-            # This might satisfy an early invisible check
+            # Try clicking potential CAPTCHA area while still disconnected
             try:
-                self.uc_gui_click_captcha() # Use the more robust click if needed
-                print("Early CAPTCHA click attempted.")
-                self.sleep(2.0) # Pause after potential CAPTCHA interaction
+                # Use the coordinate-based click as it might be more robust for CAPTCHA
+                # First, try to find coordinates using CDP (will fail if not found)
+                captcha_iframe_selector = 'iframe[title="Cloudflare Turnstile"]'
+                iframe_rect = self.cdp.get_element_rect(captcha_iframe_selector, timeout=3)
+                # Estimate checkbox center within iframe (adjust if needed)
+                iframe_center_x = iframe_rect.x + (iframe_rect.width / 2)
+                iframe_center_y = iframe_rect.y + (iframe_rect.height / 2)
+                self.uc_gui_click_x_y(iframe_center_x, iframe_center_y)
+                print("Early CAPTCHA click attempted via coordinates.")
+                self.sleep(2.5) # Pause after potential CAPTCHA interaction
             except Exception as captcha_err:
-                print(f"Early CAPTCHA click failed (maybe none present): {captcha_err}")
-                # Continue anyway, might not have been necessary
+                print(f"Could not find/click CAPTCHA early (maybe none present): {captcha_err}")
+                # Try the standard uc_gui_click_captcha as fallback, still disconnected
+                try:
+                    self.uc_gui_click_captcha()
+                    print("Early CAPTCHA click attempted via standard method.")
+                    self.sleep(2.5)
+                except Exception as captcha_err2:
+                     print(f"Standard CAPTCHA click also failed: {captcha_err2}")
+                     # Continue anyway
 
-            print("Waiting for email field...")
-            email_selector = 'input[name="identifier"]'
-            # Increase the timeout for the first wait significantly
-            self.wait_for_element(email_selector, timeout=20) # <<< Increased timeout
+            print("Waiting for email field using CDP...")
+            # Use the ID selector from the HTML provided earlier
+            email_selector = '#identifier-field'
+            # Use CDP wait method while still disconnected
+            self.cdp.wait_for_element_visible(email_selector, timeout=25) # <<< CDP WAIT & INCREASED TIMEOUT
 
             print(f"Typing email: {email}")
-            # If wait_for_element succeeded, now use CDP type
-            self.cdp.type(email_selector, email)
-            self.sleep(0.7) # Slightly longer human-like pause
+            self.cdp.type(email_selector, email) # CDP type
+            self.sleep(0.8) # <<< Increased pause
 
             print("Clicking Continue (Email)...")
             continue_button_selector = 'form button:contains("Continue")'
-            self.cdp.click(continue_button_selector)
-            self.sleep(6.0) # <<< Increased sleep after first continue
+            self.cdp.click(continue_button_selector) # CDP click
+            self.sleep(7.0) # <<< INCREASED SLEEP
 
-            # === Step b: Enter Password ===
-            print("Waiting for password field...")
-            password_selector = 'input[name="password"]'
-            self.wait_for_element(password_selector, timeout=15) # <<< Increased timeout
+            # === Step b: Enter Password (still disconnected) ===
+            print("Waiting for password field using CDP...")
+            password_selector = '#password-field' # Use ID from HTML
+            self.cdp.wait_for_element_visible(password_selector, timeout=20) # <<< CDP WAIT & INCREASED TIMEOUT
             print("Typing password...")
-            self.cdp.type(password_selector, password)
-            self.sleep(0.7) # Slightly longer human-like pause
+            self.cdp.type(password_selector, password) # CDP type
+            self.sleep(0.8) # <<< Increased pause
 
             print("Clicking Continue (Password)...")
-            self.cdp.click(continue_button_selector)
+            self.cdp.click(continue_button_selector) # CDP click
+            print("Adding significant sleep after final continue click...")
+            self.sleep(10.0) # <<< VERY LONG SLEEP hoping login completes
 
+            # === Reconnect and Verify Login ===
+            print("Reconnecting WebDriver to verify login...")
+            self.reconnect() # <<< RECONNECT NOW
             print("Waiting for successful login indicator...")
+            # Use standard wait now that driver is connected
             self.wait_for_element('button[aria-label*="User menu"]', timeout=30) # <<< Increased timeout
             print("Login appears successful.")
-            self.sleep(3) # <<< Increased sleep after login
+            self.sleep(3)
 
             # === Step c: Navigate to Keys page and extract cookies ===
             keys_url = "https://openrouter.ai/settings/keys"
             print(f"Navigating to Keys page: {keys_url}")
-            self.open(keys_url)
+            self.open(keys_url) # Standard open is fine now
             print("Waiting for Keys page elements...")
-            self.wait_for_element('h2:contains("API Keys")', timeout=25) # <<< Increased timeout
+            self.wait_for_element('h2:contains("API Keys")', timeout=30) # <<< Increased timeout
             print("Keys page loaded.")
-            self.sleep(3) # <<< Increased sleep on keys page
+            self.sleep(3)
 
             print("Extracting cookies for domain 'clerk.openrouter.ai'...")
             all_cookies = self.get_cookies()
@@ -102,9 +120,10 @@ class OpenRouterCookieExtractor(BaseCase):
         except Exception as e:
             print(f"\nAn error occurred during the process: {e}")
             print("Attempting to save screenshot...")
-            # Add a small delay before screenshot in case it helps stability
             time.sleep(1)
             try:
+                # Try connecting first if screenshot fails disconnected
+                if not self.is_connected(): self.reconnect(0.2)
                 self.save_screenshot_to_logs(name="error_screenshot")
                 print("Screenshot saved to logs.")
             except Exception as ss_error:
