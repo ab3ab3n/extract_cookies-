@@ -22,57 +22,67 @@ class OpenRouterCookieExtractor(BaseCase):
 
         # --- Login Steps ---
         try:
-            # Step a: Go to sign-in, enter email, click Continue
+            # Step a: Go to sign-in stealthily, enter email, click Continue
             signin_url = "https://openrouter.ai/sign-in"
-            print(f"Opening: {signin_url}")
-            self.open(signin_url)
+            print(f"Opening stealthily: {signin_url}")
+            # Use uc_open_with_reconnect for initial load & CDP activation
+            # Increased reconnect_time allows more time for page/CAPTCHA checks
+            self.uc_open_with_reconnect(signin_url, reconnect_time=4.5) # <--- CHANGE HERE
 
-            # Activate CDP Mode immediately for stealthy interactions
-            print("Activating CDP Mode...")
-            self.activate_cdp_mode()
-            self.sleep(2.5) # Allow initial load & potential CAPTCHA checks
+            print("Waiting for email field...")
+            # Explicitly wait for the element AFTER reconnecting
+            email_selector = 'input[name="identifier"]'
+            self.wait_for_element(email_selector) # <--- ADDED WAIT
 
             print(f"Typing email: {email}")
             # Use CDP type for stealth
-            self.cdp.type('input[name="identifier"]', email)
+            self.cdp.type(email_selector, email)
             self.sleep(0.6) # Human-like pause
 
             print("Clicking Continue (Email)...")
             # Use CDP click for stealth
-            self.cdp.click('button:contains("Continue")')
-            self.sleep(3.5) # Wait for redirect & password page load
+            # Make selector more specific if needed
+            continue_button_selector = 'form button:contains("Continue")'
+            self.cdp.click(continue_button_selector)
+            # Increase sleep after first continue click, password page might take time
+            self.sleep(5.0) # <--- INCREASED SLEEP
 
             # Step b: Enter Password and click Continue again
             print("Waiting for password field...")
-            # Wait for password field to ensure page transition
-            self.wait_for_element('input[name="password"]')
+            # Wait for password field to ensure page transition is complete
+            password_selector = 'input[name="password"]'
+            self.wait_for_element(password_selector) # <--- ADDED WAIT
             print("Typing password...")
-            self.cdp.type('input[name="password"]', password)
+            self.cdp.type(password_selector, password)
             self.sleep(0.6) # Human-like pause
 
             print("Clicking Continue (Password)...")
-            self.cdp.click('button:contains("Continue")')
+            # Re-use the continue button selector (assuming it's the same structure)
+            self.cdp.click(continue_button_selector)
 
             # CRUCIAL: Wait for login to complete and redirect
-            # Check for an element that only appears when logged in
             print("Waiting for successful login indicator...")
-            # Adjust selector if needed - e.g., user avatar, specific nav item
-            self.wait_for_element('button[aria-label*="User menu"]', timeout=20)
+            # Using the user menu button as a sign of successful login
+            # Increased timeout for potentially slow post-login load
+            self.wait_for_element('button[aria-label*="User menu"]', timeout=25) # <--- INCREASED TIMEOUT
             print("Login appears successful.")
             self.sleep(2) # Extra pause after login confirmation
 
             # Step c: Navigate to Keys page and extract cookies
             keys_url = "https://openrouter.ai/settings/keys"
             print(f"Navigating to Keys page: {keys_url}")
-            self.open(keys_url)
+            # Use standard open for subsequent navigations after login
+            self.open(keys_url) # <--- Changed from activate_cdp_mode
             print("Waiting for Keys page elements...")
             # Wait for an element specific to the keys page
-            self.wait_for_element('button:contains("Create Key")', timeout=15)
+            # Increased timeout for potentially slow page load
+            self.wait_for_element('h2:contains("API Keys")', timeout=20) # <--- More robust selector & INCREASED TIMEOUT
             print("Keys page loaded.")
             self.sleep(2) # Pause on keys page
 
             print("Extracting cookies for domain 'clerk.openrouter.ai'...")
-            all_cookies = self.get_cookies()
+            # Cookies should be available now via standard WebDriver methods
+            all_cookies = self.get_cookies() # <--- Standard get_cookies is fine now
             clerk_cookies = [
                 cookie for cookie in all_cookies
                 if cookie.get('domain') == 'clerk.openrouter.ai'
